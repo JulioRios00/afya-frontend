@@ -4,20 +4,16 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  TextField,
   Button,
+  TextField,
   FormControl,
   InputLabel,
   Select,
   MenuItem,
-  Box,
-  CircularProgress,
-  Typography,
-  OutlinedInput,
-  Chip,
-  SelectChangeEvent
+  FormHelperText,
+  Grid,
+  Box
 } from '@mui/material';
-import { useS3Upload } from '@/lib/s3';
 import { Product, Category } from '@/types';
 
 interface ProductFormProps {
@@ -28,6 +24,13 @@ interface ProductFormProps {
   onSubmit: (formData: Omit<Product, '_id'>) => Promise<void>;
 }
 
+interface FormErrors {
+  name?: string;
+  description?: string;
+  price?: string;
+  category_ids?: string;
+}
+
 export default function ProductForm({ open, product, categories, onClose, onSubmit }: ProductFormProps) {
   const [formData, setFormData] = useState<Omit<Product, '_id'>>({
     name: '',
@@ -36,12 +39,10 @@ export default function ProductForm({ open, product, categories, onClose, onSubm
     category_ids: [],
     image_url: ''
   });
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [errors, setErrors] = useState<Partial<Record<keyof Product, string>>>({});
   
-  const { uploadToS3 } = useS3Upload();
-
+  const [errors, setErrors] = useState<FormErrors>({});
+  const [submitting, setSubmitting] = useState(false);
+  
   useEffect(() => {
     if (product) {
       setFormData({
@@ -52,57 +53,54 @@ export default function ProductForm({ open, product, categories, onClose, onSubm
         image_url: product.image_url || ''
       });
     } else {
-      resetForm();
+      // Reset form for new product
+      setFormData({
+        name: '',
+        description: '',
+        price: '',
+        category_ids: [],
+        image_url: ''
+      });
     }
-  }, [product]);
-
-  const resetForm = () => {
-    setFormData({
-      name: '',
-      description: '',
-      price: '',
-      category_ids: [],
-      image_url: ''
-    });
-    setImageFile(null);
+    
+    // Clear errors when form opens
     setErrors({});
-  };
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  }, [product, open]);
+  
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | { name?: string; value: unknown }>) => {
     const { name, value } = e.target;
-    setFormData({ ...formData, [name]: value });
-    
-    // Clear error when field is edited
-    if (errors[name as keyof Product]) {
-      setErrors({ ...errors, [name]: '' });
-    }
-  };
-
-  const handleCategoryChange = (event: SelectChangeEvent<string[]>) => {
-    const {
-      target: { value },
-    } = event;
-    
-    const categoryIds = typeof value === 'string' ? value.split(',') : value;
-    
-    setFormData({ ...formData, category_ids: categoryIds });
-    
-    if (errors.category_ids) {
-      setErrors({ ...errors, category_ids: '' });
-    }
-  };
-
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setImageFile(e.target.files[0]);
-      if (errors.image_url) {
-        setErrors({ ...errors, image_url: '' });
+    if (name) {
+      setFormData({
+        ...formData,
+        [name]: value
+      });
+      
+      // Clear error for this field if it exists
+      if (errors[name as keyof FormErrors]) {
+        setErrors({
+          ...errors,
+          [name]: undefined
+        });
       }
     }
   };
-
+  
+  const handleCategoryChange = (e: React.ChangeEvent<{ value: unknown }>) => {
+    setFormData({
+      ...formData,
+      category_ids: e.target.value as string[]
+    });
+    
+    if (errors.category_ids) {
+      setErrors({
+        ...errors,
+        category_ids: undefined
+      });
+    }
+  };
+  
   const validateForm = (): boolean => {
-    const newErrors: Partial<Record<keyof Product, string>> = {};
+    const newErrors: FormErrors = {};
     
     if (!formData.name.trim()) {
       newErrors.name = 'Name is required';
@@ -114,5 +112,139 @@ export default function ProductForm({ open, product, categories, onClose, onSubm
     
     if (!formData.price) {
       newErrors.price = 'Price is required';
-	}
+    }
+    
+    if (formData.category_ids.length === 0) {
+      newErrors.category_ids = 'Please select at least one category';
+    }
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+  
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!validateForm()) {
+      return;
+    }
+    
+    setSubmitting(true);
+    
+    try {
+      await onSubmit(formData);
+    } catch (error) {
+      console.error('Error submitting form:', error);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+      <DialogTitle>{product ? 'Edit Product' : 'Add New Product'}</DialogTitle>
+      <form onSubmit={handleSubmit}>
+        <DialogContent>
+          <Grid container spacing={2}>
+            <Grid item xs={12}>
+              <TextField
+                name="name"
+                label="Product Name"
+                fullWidth
+                value={formData.name}
+                onChange={handleChange}
+                error={!!errors.name}
+                helperText={errors.name}
+                margin="normal"
+              />
+            </Grid>
+            
+            <Grid item xs={12}>
+              <TextField
+                name="description"
+                label="Description"
+                fullWidth
+                multiline
+                rows={4}
+                value={formData.description}
+                onChange={handleChange}
+                error={!!errors.description}
+                helperText={errors.description}
+                margin="normal"
+              />
+            </Grid>
+            
+            <Grid item xs={12} md={6}>
+              <TextField
+                name="price"
+                label="Price"
+                fullWidth
+                type="number"
+                InputProps={{ inputProps: { min: 0, step: 0.01 } }}
+                value={formData.price}
+                onChange={handleChange}
+                error={!!errors.price}
+                helperText={errors.price}
+                margin="normal"
+              />
+            </Grid>
+            
+            <Grid item xs={12} md={6}>
+              <FormControl 
+                fullWidth 
+                margin="normal"
+                error={!!errors.category_ids}
+              >
+                <InputLabel id="category-select-label">Categories</InputLabel>
+                <Select
+                  labelId="category-select-label"
+                  multiple
+                  value={formData.category_ids}
+                  onChange={handleCategoryChange}
+                  renderValue={(selected) => {
+                    const selectedNames = (selected as string[])
+                      .map(id => categories.find(cat => cat._id === id)?.name || '')
+                      .join(', ');
+                    return selectedNames;
+                  }}
+                >
+                  {categories.map(category => (
+                    <MenuItem key={category._id} value={category._id}>
+                      {category.name}
+                    </MenuItem>
+                  ))}
+                </Select>
+                {errors.category_ids && (
+                  <FormHelperText>{errors.category_ids}</FormHelperText>
+                )}
+              </FormControl>
+            </Grid>
+            
+            <Grid item xs={12}>
+              <TextField
+                name="image_url"
+                label="Image URL (optional)"
+                fullWidth
+                value={formData.image_url || ''}
+                onChange={handleChange}
+                margin="normal"
+              />
+            </Grid>
+          </Grid>
+        </DialogContent>
+        
+        <DialogActions>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button 
+            type="submit" 
+            variant="contained" 
+            color="primary"
+            disabled={submitting}
+          >
+            {submitting ? 'Saving...' : 'Save'}
+          </Button>
+        </DialogActions>
+      </form>
+    </Dialog>
+  );
 }
